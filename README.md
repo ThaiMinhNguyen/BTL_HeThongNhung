@@ -88,22 +88,6 @@ python predict.py --source path/to/video.mp4 --show --save
 python predict.py --model runs/detect/drowning_detection/weights/best.pt --conf 0.25
 ```
 
-### Using Alternative CNN Model
-
-This project also includes an alternative CNN-based drowning detection model using `cvlib` for person detection:
-
-```bash
-# Using webcam
-python DrownDetect.py --source 0
-
-# Using a video file (place video in 'videos' folder)
-python DrownDetect.py --source video_name.mp4
-```
-
-Note: This approach requires the following files:
-- `model.pth`: The trained CNN model weights
-- `lb.pkl`: Label binarizer for class mapping
-
 ## Project Structure
 
 ```
