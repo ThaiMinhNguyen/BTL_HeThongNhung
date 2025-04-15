@@ -18,7 +18,9 @@ class DrowningDetectionApp:
         self.models = {
             "Model 1 (best.pt)": "runs/drowning_detection/weights/best.pt",
             "Model 2 (best1.pt)": "runs/drowning_detection/weights/best1.pt",
-            "Model 3 (best2.pt)": "runs/drowning_detection/weights/best2.pt"
+            "Model 3 (best2.pt)": "runs/drowning_detection/weights/best2.pt", #best model by far
+            "Model 4 (blurry.pt)": "runs/drowning_detection/weights/blurry.pt", #blurry model
+            "Model 5 (best3.pt)": "runs/drowning_detection/weights/best3.pt" 
         }
         
         # Default values
