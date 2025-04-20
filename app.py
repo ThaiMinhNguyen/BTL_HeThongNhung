@@ -8,9 +8,13 @@ from PIL import Image
 import tempfile
 import torch  # Thêm import torch
 
-# Thêm dòng này để cho phép tải các model của ultralytics
+# Thêm dòng này để cho phép tải các model của ultralytics và torch
 import ultralytics.nn.tasks
-torch.serialization.add_safe_globals([ultralytics.nn.tasks.DetectionModel])
+import torch.nn.modules.container
+torch.serialization.add_safe_globals([
+    ultralytics.nn.tasks.DetectionModel,
+    torch.nn.modules.container.Sequential
+])
 
 class DrowningDetectionApp:
     def __init__(self):
