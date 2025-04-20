@@ -251,6 +251,11 @@ class DrowningDetectionApp:
             
         self.status_var.set("Processing video...")
         
+        # For auto-saving images
+        alert_saved = False
+        save_dir = "drowning_alerts"
+        os.makedirs(save_dir, exist_ok=True)
+        
         while self.is_playing:
             ret, frame = self.cap.read()
             if not ret:
@@ -306,6 +311,7 @@ class DrowningDetectionApp:
             if high_conf_drowning:
                 if drowning_start_time is None:
                     drowning_start_time = current_time
+                    alert_saved = False  # Reset saved flag when a new drowning is detected
             else:
                 drowning_start_time = None
             
@@ -319,6 +325,14 @@ class DrowningDetectionApp:
             
             # Draw bounding boxes and alerts
             processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
+            
+            # Auto-save image when alert triggers and hasn't been saved yet
+            if show_alert and not alert_saved:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                save_path = os.path.join(save_dir, f"drowning_alert_{timestamp}.jpg")
+                cv2.imwrite(save_path, processed_frame)
+                alert_saved = True
+                self.status_var.set(f"Alert! Image saved to {save_path}")
             
             # Add drowning timer indicator if detecting drowning
             if drowning_start_time is not None:
