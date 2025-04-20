@@ -39,19 +39,44 @@ class DrowningDetectionApp:
     def load_model(self, model_path):
         """Load the selected YOLO model"""
         try:
-            # Hai cách tải model: 
-            # 1. Sử dụng weights_only=False trong phiên bản PyTorch 2.6+
-            try:
-                # Cách 1: load model với cài đặt weights_only=False (không khuyên khích)
-                # Chỉ sử dụng nếu bạn tin tưởng nguồn file model
-                self.model = YOLO(model_path)
-            except Exception as e:
-                # Nếu cách 1 không thành công, thử cách 2
-                st.warning("Trying alternative loading method...")
-                # Cách 2: Sử dụng add_safe_globals() (được khuyên dùng)
-                # Đã thêm ở đầu file: torch.serialization.add_safe_globals([ultralytics.nn.tasks.DetectionModel])
-                self.model = YOLO(model_path)
-                
+            # Cách 1: Sử dụng context manager cho safe_globals
+            with torch.serialization.safe_globals([
+                ultralytics.nn.tasks.DetectionModel,
+                torch.nn.modules.container.Sequential
+            ]):
+                try:
+                    self.model = YOLO(model_path)
+                except Exception as e1:
+                    st.warning(f"First loading attempt failed: {e1}")
+                    
+                    # Cách 2: Sử dụng weights_only=False (chỉ dùng nếu tin tưởng nguồn model)
+                    try:
+                        # Phương pháp này không khuyến khích vì lý do bảo mật
+                        # Nhưng đôi khi cần thiết trên Streamlit Cloud
+                        import yaml
+                        import ultralytics
+                        from ultralytics.engine.model import Model
+                        
+                        # Tìm đường dẫn tới hàm torch.load trong ultralytics
+                        original_torch_load = torch.load
+                        
+                        # Monkey patch torch.load để sử dụng weights_only=False
+                        def patched_torch_load(*args, **kwargs):
+                            kwargs['weights_only'] = False
+                            return original_torch_load(*args, **kwargs)
+                        
+                        # Tạm thời thay thế torch.load
+                        torch.load = patched_torch_load
+                        
+                        # Tải model với phương thức đã patch
+                        self.model = YOLO(model_path)
+                        
+                        # Khôi phục torch.load ban đầu
+                        torch.load = original_torch_load
+                    except Exception as e2:
+                        st.error(f"Second loading attempt failed: {e2}")
+                        raise e2
+            
             st.success(f"Model loaded successfully from {model_path}")
             return True
         except Exception as e:

@@ -1,0 +1,17 @@
+[server]
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
+
+[runner]
+fastReruns = true
+
+[setup]
+tensorboardRequiredArgs = []
+
+[global]
+developmentMode = false
+
+[serialization]
+useGlobally = true 
