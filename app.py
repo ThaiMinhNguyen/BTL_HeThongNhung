@@ -264,7 +264,7 @@ class DrowningDetectionApp:
                 
                 # Hiển thị hình ảnh đã lưu
                 alert_img = Image.open(save_path)
-                alert_placeholder.image(alert_img, caption="⚠️ PHÁT HIỆN ĐUỐI NƯỚC! ⚠️", use_column_width=True)
+                alert_placeholder.image(alert_img, caption="⚠️ PHÁT HIỆN ĐUỐI NƯỚC! ⚠️", use_container_width=True)
             
             # Thêm chỉ báo bộ đếm thời gian đuối nước
             if drowning_start_time is not None:
