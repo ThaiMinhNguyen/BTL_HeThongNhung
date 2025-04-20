@@ -260,11 +260,19 @@ def main():
     st.title("Drowning Detection System")
     st.markdown("""
     This application uses YOLO to detect drowning incidents in swimming videos.
-    Upload a video and adjust the detection parameters to monitor for possible drowning events.
+    Upload a video and the system will automatically analyze it for possible drowning events.
     """)
     
     # Initialize app
     app = DrowningDetectionApp()
+    
+    # Initialize session state
+    if 'model_loaded' not in st.session_state:
+        st.session_state.model_loaded = False
+    if 'current_video' not in st.session_state:
+        st.session_state.current_video = None
+    if 'video_processed' not in st.session_state:
+        st.session_state.video_processed = False
     
     # Sidebar for model selection and parameters
     with st.sidebar:
@@ -274,13 +282,22 @@ def main():
         model_name = st.selectbox(
             "Select Model",
             options=list(app.models.keys()),
-            index=0
+            index=5  # Model 6 (model.pt) là mô hình tốt nhất
         )
         model_path = app.models[model_name]
         
-        # Load model button
+        # Automatically load model if not already loaded
+        if not st.session_state.model_loaded:
+            with st.spinner("Loading model..."):
+                if app.load_model(model_path):
+                    st.session_state.model_loaded = True
+        
+        # Manual model loading button
         if st.button("Load Selected Model"):
-            app.load_model(model_path)
+            with st.spinner("Loading model..."):
+                if app.load_model(model_path):
+                    st.session_state.model_loaded = True
+                    st.session_state.video_processed = False  # Reset processed state
         
         st.divider()
         
@@ -309,12 +326,22 @@ def main():
             value=app.alert_time,
             step=0.5
         )
+        
+        # Parameter changes reset video processed state
+        if conf_threshold != app.conf_threshold or alert_conf != app.alert_conf or alert_time != app.alert_time:
+            st.session_state.video_processed = False
     
     # Main content area
     # File uploader for video
-    video_file = st.file_uploader("Upload Video", type=["mp4", "avi", "mov", "mkv"])
+    st.subheader("Upload Video")
+    video_file = st.file_uploader("", type=["mp4", "avi", "mov", "mkv"])
     
     if video_file is not None:
+        # Check if it's a new video
+        if st.session_state.current_video != video_file.name:
+            st.session_state.current_video = video_file.name
+            st.session_state.video_processed = False
+        
         # Display file info
         file_details = {"Filename": video_file.name, "FileType": video_file.type, "FileSize": f"{video_file.size / (1024*1024):.2f} MB"}
         st.write(file_details)
@@ -322,12 +349,24 @@ def main():
         # Video preview
         st.video(video_file)
         
-        # Process button
-        if st.button("Process Video"):
+        # Automatically process if not processed yet
+        if not st.session_state.video_processed:
             if app.model is None:
-                st.error("Please load a model first")
+                st.error("Model not loaded. Please wait for the model to load or click 'Load Selected Model'.")
             else:
+                with st.spinner("Automatically processing video..."):
+                    # Need to reset the position of the video file
+                    video_file.seek(0)
+                    app.process_video(video_file, conf_threshold, alert_conf, alert_time)
+                    st.session_state.video_processed = True
+        
+        # Optional manual processing button
+        if st.button("Process Again"):
+            st.session_state.video_processed = False
+            video_file.seek(0)  # Reset file position
+            with st.spinner("Processing video..."):
                 app.process_video(video_file, conf_threshold, alert_conf, alert_time)
+                st.session_state.video_processed = True
 
 if __name__ == "__main__":
     main() 
