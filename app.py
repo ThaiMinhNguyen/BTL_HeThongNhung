@@ -289,7 +289,7 @@ class DrowningDetectionApp:
             
             # Chuyển đổi sang RGB để hiển thị
             rgb_frame = cv2.cvtColor(processed_frame, cv2.COLOR_BGR2RGB)
-            video_placeholder.image(rgb_frame, caption="Đang xử lý video", use_column_width=True)
+            video_placeholder.image(rgb_frame, caption="Đang xử lý video", use_container_width =True)
         
         # Dọn dẹp
         cap.release()
