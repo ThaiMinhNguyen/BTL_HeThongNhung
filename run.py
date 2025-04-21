@@ -7,6 +7,8 @@ import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
 from PIL import Image, ImageTk
 import threading
+import serial
+import serial.tools.list_ports
 
 class DrowningDetectionApp:
     def __init__(self, root):
@@ -36,8 +38,17 @@ class DrowningDetectionApp:
         self.thread = None
         self.current_frame = None
         
+        # Arduino connection variables
+        self.arduino = None
+        self.arduino_connected = False
+        self.arduino_ports = []
+        self.previous_alert_state = False
+        
         # Create GUI
         self.create_widgets()
+        
+        # Scan for Arduino ports on startup
+        self.scan_arduino_ports()
         
     def create_widgets(self):
         # Main frame
@@ -77,6 +88,31 @@ class DrowningDetectionApp:
                                           command=self.update_alert_time)
         self.alert_time_slider.pack(anchor=tk.W, pady=(0, 10))
         
+        # Arduino section
+        ttk.Separator(control_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        ttk.Label(control_panel, text="Arduino Connection", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(5, 5))
+        
+        # Arduino port selection
+        ttk.Label(control_panel, text="Select Arduino Port:").pack(anchor=tk.W, pady=(5, 5))
+        self.arduino_port_var = tk.StringVar(value="Not connected")
+        self.arduino_dropdown = ttk.Combobox(control_panel, textvariable=self.arduino_port_var, 
+                                           state="readonly", width=25)
+        self.arduino_dropdown.pack(anchor=tk.W, pady=(0, 5))
+        
+        # Arduino connection buttons
+        arduino_button_frame = ttk.Frame(control_panel)
+        arduino_button_frame.pack(anchor=tk.W, pady=(0, 10), fill=tk.X)
+        
+        self.connect_btn = ttk.Button(arduino_button_frame, text="Connect", command=self.connect_arduino)
+        self.connect_btn.pack(side=tk.LEFT, padx=(0, 5))
+        
+        self.scan_btn = ttk.Button(arduino_button_frame, text="Scan Ports", command=self.scan_arduino_ports)
+        self.scan_btn.pack(side=tk.LEFT)
+        
+        # Arduino status
+        self.arduino_status_var = tk.StringVar(value="Arduino Status: Not connected")
+        ttk.Label(control_panel, textvariable=self.arduino_status_var).pack(anchor=tk.W, pady=(0, 10))
+        
         # Video controls
         ttk.Separator(control_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
@@ -115,6 +151,102 @@ class DrowningDetectionApp:
         
         # Initial model loading
         self.load_model()
+    
+    def scan_arduino_ports(self):
+        """Scan available COM ports for Arduino devices"""
+        self.arduino_ports = []
+        available_ports = list(serial.tools.list_ports.comports())
+        
+        if not available_ports:
+            self.arduino_dropdown.config(values=["No ports available"])
+            self.arduino_port_var.set("No ports available")
+            return
+        
+        # Create a list of port names
+        port_names = []
+        for port in available_ports:
+            port_name = f"{port.device} - {port.description}"
+            port_names.append(port_name)
+            self.arduino_ports.append(port.device)
+        
+        # Update dropdown values
+        self.arduino_dropdown.config(values=port_names)
+        self.arduino_port_var.set(port_names[0] if port_names else "No ports available")
+        
+        # Update status
+        self.status_var.set(f"Found {len(port_names)} serial port(s)")
+    
+    def connect_arduino(self):
+        """Connect to the selected Arduino port"""
+        if not self.arduino_ports:
+            self.show_error("No Arduino ports available")
+            return
+        
+        selected_index = self.arduino_dropdown.current()
+        if selected_index < 0 or selected_index >= len(self.arduino_ports):
+            self.show_error("Please select a valid port")
+            return
+        
+        selected_port = self.arduino_ports[selected_index]
+        
+        # Close existing connection if open
+        if self.arduino is not None and self.arduino.is_open:
+            try:
+                self.arduino.close()
+            except Exception as e:
+                self.show_error(f"Error closing previous connection: {str(e)}")
+        
+        # Try to open new connection
+        try:
+            self.arduino = serial.Serial(selected_port, 9600, timeout=1)
+            time.sleep(2)  # Wait for Arduino to reset
+            self.arduino_connected = True
+            self.arduino_status_var.set(f"Arduino Status: Connected to {selected_port}")
+            self.connect_btn.config(text="Disconnect")
+            self.connect_btn.config(command=self.disconnect_arduino)
+            self.status_var.set(f"Successfully connected to Arduino on {selected_port}")
+        except Exception as e:
+            self.show_error(f"Failed to connect to Arduino: {str(e)}")
+            self.arduino_connected = False
+            self.arduino = None
+    
+    def disconnect_arduino(self):
+        """Disconnect from Arduino"""
+        if self.arduino is not None and self.arduino.is_open:
+            try:
+                # Send stop alert command before disconnecting
+                self.send_arduino_command("STOP_ALERT")
+                time.sleep(0.5)
+                self.arduino.close()
+                self.arduino_connected = False
+                self.arduino_status_var.set("Arduino Status: Not connected")
+                self.connect_btn.config(text="Connect")
+                self.connect_btn.config(command=self.connect_arduino)
+                self.status_var.set("Arduino disconnected")
+            except Exception as e:
+                self.show_error(f"Error disconnecting from Arduino: {str(e)}")
+        else:
+            self.arduino_connected = False
+            self.arduino_status_var.set("Arduino Status: Not connected")
+            self.connect_btn.config(text="Connect")
+            self.connect_btn.config(command=self.connect_arduino)
+    
+    def send_arduino_command(self, command):
+        """Send command to Arduino"""
+        if not self.arduino_connected or self.arduino is None:
+            return
+        
+        try:
+            self.arduino.write(f"{command}\n".encode())
+            # Optional: Read response from Arduino
+            # response = self.arduino.readline().decode().strip()
+            # print(f"Arduino Response: {response}")
+        except Exception as e:
+            self.show_error(f"Error sending command to Arduino: {str(e)}")
+            self.arduino_connected = False
+            self.arduino_status_var.set("Arduino Status: Connection lost")
+            self.connect_btn.config(text="Connect")
+            self.connect_btn.config(command=self.connect_arduino)
     
     def update_model(self, event=None):
         model_name = self.model_var.get()
@@ -198,6 +330,11 @@ class DrowningDetectionApp:
         if self.is_playing:
             self.is_playing = False
             self.play_btn.config(text="Play Video")
+            
+            # Stop alert if video is paused
+            if self.arduino_connected:
+                self.send_arduino_command("STOP_ALERT")
+                self.previous_alert_state = False
         else:
             self.is_playing = True
             self.play_btn.config(text="Pause Video")
@@ -210,6 +347,11 @@ class DrowningDetectionApp:
     def stop_video(self):
         self.is_playing = False
         self.play_btn.config(text="Play Video")
+        
+        # Stop alert when video is stopped
+        if self.arduino_connected:
+            self.send_arduino_command("STOP_ALERT")
+            self.previous_alert_state = False
         
         # Reset video to beginning
         if self.cap is not None:
@@ -264,6 +406,11 @@ class DrowningDetectionApp:
                 self.play_btn.config(text="Play Video")
                 self.status_var.set("End of video")
                 self.root.after(0, lambda: self.play_btn.config(state=tk.NORMAL))
+                
+                # Stop Arduino alert at end of video
+                if self.arduino_connected:
+                    self.send_arduino_command("STOP_ALERT")
+                    self.previous_alert_state = False
                 break
                 
             # Run detection
@@ -322,6 +469,14 @@ class DrowningDetectionApp:
             
             # Determine if alert should be shown
             show_alert = drowning_start_time is not None and drowning_duration >= self.alert_time
+            
+            # Update Arduino with alert status
+            if self.arduino_connected and show_alert != self.previous_alert_state:
+                if show_alert:
+                    self.send_arduino_command("DROWNING_ALERT")
+                else:
+                    self.send_arduino_command("STOP_ALERT")
+                self.previous_alert_state = show_alert
             
             # Draw bounding boxes and alerts
             processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
@@ -422,6 +577,11 @@ class DrowningDetectionApp:
         if alert:
             self.info_text.insert(tk.END, "\n⚠️ DROWNING ALERT! ⚠️\n", "alert")
             self.info_text.tag_configure("alert", foreground="red", font=("Arial", 12, "bold"))
+            
+            # Add Arduino status if connected
+            if self.arduino_connected:
+                self.info_text.insert(tk.END, "\nArduino alarm activated!", "arduino")
+                self.info_text.tag_configure("arduino", foreground="blue", font=("Arial", 10, "bold"))
         
         self.info_text.config(state=tk.DISABLED)
     

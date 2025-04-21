@@ -1,0 +1,7 @@
+ultralytics==8.1.1
+opencv-python==4.8.1.78
+numpy>=1.22.0
+pillow>=9.0.0
+pyserial==3.5
+tk
+serial
