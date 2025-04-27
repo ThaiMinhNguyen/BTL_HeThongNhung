@@ -178,25 +178,29 @@ class DrowningDetectionApp:
     
     def connect_arduino(self):
         """Connect to the selected Arduino port"""
+        import serial  # Import here for debugging
+        print(f"Serial module path: {serial.__file__}")
+        print(f"Serial module version: {serial.__version__}")
+
         if not self.arduino_ports:
             self.show_error("No Arduino ports available")
             return
-        
+    
         selected_index = self.arduino_dropdown.current()
         if selected_index < 0 or selected_index >= len(self.arduino_ports):
             self.show_error("Please select a valid port")
             return
-        
+    
         selected_port = self.arduino_ports[selected_index]
-        
+    
         # Close existing connection if open
         if self.arduino is not None and self.arduino.is_open:
             try:
                 self.arduino.close()
             except Exception as e:
                 self.show_error(f"Error closing previous connection: {str(e)}")
-        
-        # Try to open new connection
+    
+    # Try to open new connection
         try:
             self.arduino = serial.Serial(selected_port, 9600, timeout=1)
             time.sleep(2)  # Wait for Arduino to reset
