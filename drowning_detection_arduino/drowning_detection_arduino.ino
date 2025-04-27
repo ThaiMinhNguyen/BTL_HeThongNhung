@@ -4,7 +4,7 @@
 // ====== CONNECTION GUIDE ======
 // Buzzer Module Connections:
 // VCC pin  --> Connect to 5V on Arduino
-// I/O pin  --> Connect to Digital Pin 9 on Arduino
+// I/O pin  --> Connect to Digital Pin 7 on Arduino
 // GND pin  --> Connect to GND on Arduino
 // ============================== 
 
