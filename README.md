@@ -1,113 +1,75 @@
-# Drowning Detection with YOLOv8
+# Hệ Thống Phát Hiện Đuối Nước với Arduino
 
-This project uses YOLOv8 to detect drowning incidents in swimming pools.
+Hệ thống phát hiện đuối nước sử dụng mô hình YOLOv8 kết hợp với Arduino UNO R3 và còi báo động để cảnh báo khi phát hiện sự cố đuối nước.
 
-## Environment Setup
+## Thành phần cần thiết
 
-1. Create and activate virtual environment:
+- Arduino UNO R3
+- Còi báo động (Active Buzzer)
+- Dây cáp USB để kết nối Arduino
+- Máy tính cài đặt Python 3.8+
+
+## Hướng dẫn cài đặt
+
+### 1. Cài đặt thư viện Python
+
 ```bash
-# Create virtual environment
+# Tạo môi trường ảo (tùy chọn nhưng khuyến nghị)
 python -m venv venv
 
-# Activate virtual environment
-# On Windows:
-.\venv\Scripts\activate
-# On Linux/Mac:
+# Kích hoạt môi trường ảo
+# Trên Windows:
+Set-ExecutionPolicy Unrestricted -Scope Process  #nếu hiện lỗi running scripts disabled
+.\env\Scripts\activate
+# Trên Linux/Mac:
 source venv/bin/activate
-```
 
-2. Install dependencies:
-```bash
+# Cài đặt thư viện
 pip install -r requirements.txt
 ```
 
-## Training
+### 2. Tải lên mã Arduino
 
-To train the model:
+1. Mở Arduino IDE
+2. Tải tệp `drowning_detection_arduino.ino`
+3. Kết nối Arduino UNO R3 với máy tính qua cổng USB
+4. Chọn board Arduino UNO và cổng COM trong Arduino IDE
+5. Tải mã lên Arduino
+
+### 3. Kết nối phần cứng
+
+1. Kết nối còi báo động với Arduino:
+   - Chân dương (thường dài hơn) của còi kết nối với chân số 9 trên Arduino
+   - Chân âm (thường ngắn hơn) của còi kết nối với chân GND (đất) trên Arduino
+
+## Chạy ứng dụng
+
 ```bash
-python train.py
+python run.py
 ```
 
-The training results will be saved in the `runs/detect/drowning_detection/` directory.
+## Hướng dẫn sử dụng
 
-## Evaluation
+1. **Chọn mô hình**: Chọn một trong các mô hình phát hiện đuối nước có sẵn
+2. **Kết nối Arduino**: Nhấn "Scan Ports" để tìm Arduino, chọn và nhấn "Connect"
+3. **Chọn video**: Nhấn "Select Video" để chọn file video phân tích
+4. **Bắt đầu phát hiện**: Nhấn "Play Video" để bắt đầu phát hiện
 
-To evaluate the model performance:
-```bash
-python evaluate.py --model runs/detect/drowning_detection/weights/best.pt
-```
+## Cấu hình hệ thống
 
-Options:
-- `--model`: Path to the trained model
-- `--data`: Path to the data configuration file
-- `--iou`: IOU threshold for evaluation
-- `--save_dir`: Directory to save evaluation results
+Bạn có thể điều chỉnh các thông số trong ứng dụng:
 
-## Inference
+- **Confidence Threshold**: Ngưỡng tin cậy tối thiểu để phát hiện đối tượng (0.1-0.9)
+  - Giá trị thấp: Phát hiện nhiều đối tượng nhưng có thể có nhiều cảnh báo sai
+  - Giá trị cao: Ít phát hiện hơn nhưng chính xác hơn
 
-### Using YOLOv8 Model with Advanced Drowning Alerts
+- **Alert Confidence**: Ngưỡng tin cậy để kích hoạt cảnh báo đuối nước (0.1-0.9)
+  - Chỉ khi phát hiện đuối nước có độ tin cậy cao hơn giá trị này, hệ thống mới tính thời gian để kích hoạt cảnh báo
 
-For real-time drowning detection with alert system:
-```bash
-# Using webcam
-python yolo_drown_detect.py --show
+- **Alert Time**: Thời gian phát hiện đuối nước liên tục trước khi kích hoạt cảnh báo (giây)
 
-# Using a video file
-python yolo_drown_detect.py --source path/to/video.mp4 --show --save
+## Xử lý sự cố
 
-# Using a specific model with custom confidence threshold
-python yolo_drown_detect.py --model runs/detect/drowning_detection/weights/best.pt --conf 0.25 --output_path output_video.mp4
-```
-
-Options:
-- `--source`: Source video file or webcam index (0, 1, etc.)
-- `--model`: Path to the trained model
-- `--conf`: Confidence threshold
-- `--save`: Save video output
-- `--show`: Show detection results
-- `--output_path`: Custom path for output video
-
-This script includes:
-- Real-time drowning detection
-- Visual alerts with red borders
-- Warning text when drowning is detected
-- FPS counter
-- Configurable alert threshold
-
-### Using YOLOv8 Model (Basic Version)
-
-Basic inference without the alert system:
-```bash
-# Using webcam
-python predict.py --show
-
-# Using a video file
-python predict.py --source path/to/video.mp4 --show --save
-
-# Using the trained model
-python predict.py --model runs/detect/drowning_detection/weights/best.pt --conf 0.25
-```
-
-## Project Structure
-
-```
-Drown_Detect/
-├── data/
-│   ├── train/
-│   │   ├── images/
-│   │   └── labels/
-│   ├── val/
-│   │   ├── images/
-│   │   └── labels/
-│   └── data.yaml
-├── models/
-├── runs/
-├── videos/
-├── venv/
-├── requirements.txt
-├── predict.py
-├── evaluate.py
-├── DrownDetect.py
-├── yolo_drown_detect.py
-└── train.py
-``` 
+- **Không tìm thấy Arduino**: Đảm bảo đã kết nối đúng và cài đặt driver
+- **Không có âm thanh còi**: Kiểm tra kết nối dây và đảm bảo còi hoạt động
+- **Lỗi cổng COM**: Đóng các ứng dụng khác có thể đang sử dụng cổng COM 
