@@ -19,7 +19,8 @@ python -m venv venv
 
 # Kích hoạt môi trường ảo
 # Trên Windows:
-.\venv\Scripts\activate
+Set-ExecutionPolicy Unrestricted -Scope Process  #nếu hiện lỗi running scripts disabled
+.\env\Scripts\activate
 # Trên Linux/Mac:
 source venv/bin/activate
 
