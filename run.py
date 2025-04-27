@@ -177,10 +177,8 @@ class DrowningDetectionApp:
         self.status_var.set(f"Found {len(port_names)} serial port(s)")
     
     def connect_arduino(self):
-        """Connect to the selected Arduino port"""
-        import serial  # Import here for debugging
-        print(f"Serial module path: {serial.__file__}")
-        print(f"Serial module version: {serial.__version__}")
+        """Connect to the selected Arduino port"""  # Import here for debugging
+       
 
         if not self.arduino_ports:
             self.show_error("No Arduino ports available")
@@ -291,7 +289,8 @@ class DrowningDetectionApp:
                 # Schedule GUI update on the main thread
                 self.root.after(0, self.model_loaded)
             except Exception as e:
-                self.root.after(0, lambda: self.show_error(f"Error loading model: {str(e)}"))
+                error_msg = f"Error loading model: {str(e)}"
+                self.root.after(0, lambda msg=error_msg: self.show_error(msg))
         
         threading.Thread(target=load_model_thread, daemon=True).start()
     
