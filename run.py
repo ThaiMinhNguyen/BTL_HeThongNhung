@@ -16,50 +16,57 @@ class DrowningDetectionApp:
         self.root.title("Drowning Detection Application")
         self.root.geometry("1280x800")
         
-        # Các mô hình có sẵn
+        # Available models
         self.models = {
             "Model 1 (best.pt)": "runs/drowning_detection/weights/best.pt",
             "Model 2 (best1.pt)": "runs/drowning_detection/weights/best1.pt",
             "Model 3 (best2.pt)": "runs/drowning_detection/weights/best2.pt",
-            "Model 4 (blurry.pt)": "runs/drowning_detection/weights/blurry.pt", #mô hình mờ
+            "Model 4 (blurry.pt)": "runs/drowning_detection/weights/blurry.pt", #blurry model
             "Model 5 (best3.pt)": "runs/drowning_detection/weights/best3.pt",
-            "Model 6 (model.pt)": "runs/drowning_detection/weights/model.pt"   #mô hình tốt nhất 
+            "Model 6 (model.pt)": "runs/drowning_detection/weights/model.pt"   #best model by far
         }
         
-        # Giá trị mặc định
+        # Default values
         self.model_path = list(self.models.values())[0]
         self.conf_threshold = 0.25
         self.alert_conf = 0.65
         self.alert_time = 5.0
         
-        # Biến xử lý video
+        # Video processing variables
         self.cap = None
         self.is_playing = False
         self.thread = None
         self.current_frame = None
         
-        # Biến kết nối Arduino
+        # Performance optimization variables
+        self.target_fps = 15  # Target FPS
+        self.skip_frames = 0  # Skip frames counter
+        self.frame_count = 0
+        self.start_time = 0
+        self.actual_fps = 0
+        
+        # Arduino connection variables
         self.arduino = None
         self.arduino_connected = False
         self.arduino_ports = []
         self.previous_alert_state = False
         
-        # Tạo giao diện
+        # Create GUI
         self.create_widgets()
         
-        # Quét cổng Arduino khi khởi động
+        # Scan for Arduino ports on startup
         self.scan_arduino_ports()
         
     def create_widgets(self):
-        # Khung chính
+        # Main frame
         main_frame = ttk.Frame(self.root, padding=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Bảng điều khiển (bên trái)
+        # Control panel (left side)
         control_panel = ttk.LabelFrame(main_frame, text="Controls", padding=10)
         control_panel.pack(side=tk.LEFT, fill=tk.Y, padx=(0, 10))
         
-        # Lựa chọn mô hình
+        # Model selection
         ttk.Label(control_panel, text="Select Model:").pack(anchor=tk.W, pady=(0, 5))
         self.model_var = tk.StringVar(value=list(self.models.keys())[0])
         model_dropdown = ttk.Combobox(control_panel, textvariable=self.model_var, 
@@ -67,39 +74,39 @@ class DrowningDetectionApp:
         model_dropdown.pack(anchor=tk.W, pady=(0, 10))
         model_dropdown.bind("<<ComboboxSelected>>", self.update_model)
         
-        # Thanh trượt ngưỡng độ tin cậy
+        # Confidence threshold slider
         ttk.Label(control_panel, text=f"Confidence Threshold: {self.conf_threshold}").pack(anchor=tk.W, pady=(10, 5))
         self.conf_slider = ttk.Scale(control_panel, from_=0.1, to=0.9, length=200, 
                                     orient=tk.HORIZONTAL, value=self.conf_threshold,
                                     command=self.update_conf)
         self.conf_slider.pack(anchor=tk.W, pady=(0, 10))
         
-        # Thanh trượt ngưỡng cảnh báo
+        # Alert confidence threshold slider
         ttk.Label(control_panel, text=f"Alert Confidence: {self.alert_conf}").pack(anchor=tk.W, pady=(10, 5))
         self.alert_conf_slider = ttk.Scale(control_panel, from_=0.1, to=0.9, length=200, 
                                           orient=tk.HORIZONTAL, value=self.alert_conf,
                                           command=self.update_alert_conf)
         self.alert_conf_slider.pack(anchor=tk.W, pady=(0, 10))
         
-        # Thanh trượt thời gian cảnh báo
+        # Alert time slider
         ttk.Label(control_panel, text=f"Alert Time (seconds): {self.alert_time}").pack(anchor=tk.W, pady=(10, 5))
         self.alert_time_slider = ttk.Scale(control_panel, from_=1.0, to=10.0, length=200, 
                                           orient=tk.HORIZONTAL, value=self.alert_time,
                                           command=self.update_alert_time)
         self.alert_time_slider.pack(anchor=tk.W, pady=(0, 10))
         
-        # Phần Arduino
+        # Arduino section
         ttk.Separator(control_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         ttk.Label(control_panel, text="Arduino Connection", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(5, 5))
         
-        # Lựa chọn cổng Arduino
+        # Arduino port selection
         ttk.Label(control_panel, text="Select Arduino Port:").pack(anchor=tk.W, pady=(5, 5))
         self.arduino_port_var = tk.StringVar(value="Not connected")
         self.arduino_dropdown = ttk.Combobox(control_panel, textvariable=self.arduino_port_var, 
                                            state="readonly", width=25)
         self.arduino_dropdown.pack(anchor=tk.W, pady=(0, 5))
         
-        # Nút điều khiển kết nối Arduino
+        # Arduino connection buttons
         arduino_button_frame = ttk.Frame(control_panel)
         arduino_button_frame.pack(anchor=tk.W, pady=(0, 10), fill=tk.X)
         
@@ -109,51 +116,51 @@ class DrowningDetectionApp:
         self.scan_btn = ttk.Button(arduino_button_frame, text="Scan Ports", command=self.scan_arduino_ports)
         self.scan_btn.pack(side=tk.LEFT)
         
-        # Trạng thái Arduino
+        # Arduino status
         self.arduino_status_var = tk.StringVar(value="Arduino Status: Not connected")
         ttk.Label(control_panel, textvariable=self.arduino_status_var).pack(anchor=tk.W, pady=(0, 10))
         
-        # Điều khiển video
+        # Video controls
         ttk.Separator(control_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         
-        # Nút chọn video
+        # Select video button
         self.select_video_btn = ttk.Button(control_panel, text="Select Video", command=self.select_video)
         self.select_video_btn.pack(anchor=tk.W, pady=(10, 5), fill=tk.X)
         
-        # Nút phát/tạm dừng
+        # Play/Pause button
         self.play_btn = ttk.Button(control_panel, text="Play Video", command=self.toggle_play, state=tk.DISABLED)
         self.play_btn.pack(anchor=tk.W, pady=(5, 5), fill=tk.X)
         
-        # Nút dừng
+        # Stop button
         self.stop_btn = ttk.Button(control_panel, text="Stop Video", command=self.stop_video, state=tk.DISABLED)
         self.stop_btn.pack(anchor=tk.W, pady=(5, 5), fill=tk.X)
         
-        # Nút lưu kết quả
+        # Save result button
         self.save_btn = ttk.Button(control_panel, text="Save Result", command=self.save_result, state=tk.DISABLED)
         self.save_btn.pack(anchor=tk.W, pady=(5, 5), fill=tk.X)
         
-        # Trạng thái
+        # Status
         ttk.Separator(control_panel, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
         self.status_var = tk.StringVar(value="Ready. Please select a video file.")
         ttk.Label(control_panel, textvariable=self.status_var, wraplength=200).pack(anchor=tk.W, pady=10)
         
-        # Thông tin phát hiện
+        # Detection info
         self.info_text = tk.Text(control_panel, height=10, width=25, state=tk.DISABLED)
         self.info_text.pack(anchor=tk.W, pady=(10, 0), fill=tk.BOTH, expand=True)
         
-        # Hiển thị video (bên phải)
+        # Video display (right side)
         self.video_frame = ttk.LabelFrame(main_frame, text="Video", padding=10)
         self.video_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Canvas cho hiển thị video
+        # Canvas for video display
         self.canvas = tk.Canvas(self.video_frame, bg="black")
         self.canvas.pack(fill=tk.BOTH, expand=True)
         
-        # Tải mô hình ban đầu
+        # Initial model loading
         self.load_model()
     
     def scan_arduino_ports(self):
-        """Quét các cổng COM có sẵn cho thiết bị Arduino"""
+        """Scan available COM ports for Arduino devices"""
         self.arduino_ports = []
         available_ports = list(serial.tools.list_ports.comports())
         
@@ -162,22 +169,22 @@ class DrowningDetectionApp:
             self.arduino_port_var.set("No ports available")
             return
         
-        # Tạo danh sách tên cổng
+        # Create a list of port names
         port_names = []
         for port in available_ports:
             port_name = f"{port.device} - {port.description}"
             port_names.append(port_name)
             self.arduino_ports.append(port.device)
         
-        # Cập nhật giá trị dropdown
+        # Update dropdown values
         self.arduino_dropdown.config(values=port_names)
         self.arduino_port_var.set(port_names[0] if port_names else "No ports available")
         
-        # Cập nhật trạng thái
+        # Update status
         self.status_var.set(f"Found {len(port_names)} serial port(s)")
     
     def connect_arduino(self):
-        """Kết nối với cổng Arduino đã chọn"""  # Import here for debugging
+        """Connect to the selected Arduino port"""  # Import here for debugging
        
 
         if not self.arduino_ports:
@@ -191,17 +198,17 @@ class DrowningDetectionApp:
     
         selected_port = self.arduino_ports[selected_index]
     
-        # Đóng kết nối hiện có nếu đang mở
+        # Close existing connection if open
         if self.arduino is not None and self.arduino.is_open:
             try:
                 self.arduino.close()
             except Exception as e:
                 self.show_error(f"Error closing previous connection: {str(e)}")
     
-    # Thử mở kết nối mới
+    # Try to open new connection
         try:
             self.arduino = serial.Serial(selected_port, 9600, timeout=1)
-            time.sleep(2)  # Đợi Arduino khởi động lại
+            time.sleep(2)  # Wait for Arduino to reset
             self.arduino_connected = True
             self.arduino_status_var.set(f"Arduino Status: Connected to {selected_port}")
             self.connect_btn.config(text="Disconnect")
@@ -213,10 +220,10 @@ class DrowningDetectionApp:
             self.arduino = None
     
     def disconnect_arduino(self):
-        """Ngắt kết nối với Arduino"""
+        """Disconnect from Arduino"""
         if self.arduino is not None and self.arduino.is_open:
             try:
-                # Gửi lệnh dừng cảnh báo trước khi ngắt kết nối
+                # Send stop alert command before disconnecting
                 self.send_arduino_command("STOP_ALERT")
                 time.sleep(0.5)
                 self.arduino.close()
@@ -234,13 +241,13 @@ class DrowningDetectionApp:
             self.connect_btn.config(command=self.connect_arduino)
     
     def send_arduino_command(self, command):
-        """Gửi lệnh đến Arduino"""
+        """Send command to Arduino"""
         if not self.arduino_connected or self.arduino is None:
             return
         
         try:
             self.arduino.write(f"{command}\n".encode())
-            # Tuỳ chọn: Đọc phản hồi từ Arduino
+            # Optional: Read response from Arduino
             # response = self.arduino.readline().decode().strip()
             # print(f"Arduino Response: {response}")
         except Exception as e:
@@ -257,21 +264,21 @@ class DrowningDetectionApp:
     
     def update_conf(self, value):
         self.conf_threshold = float(value)
-        # Cập nhật nhãn để hiển thị giá trị hiện tại
+        # Update the label to show the current value
         for child in self.conf_slider.master.winfo_children():
             if isinstance(child, ttk.Label) and "Confidence Threshold" in child.cget("text"):
                 child.config(text=f"Confidence Threshold: {self.conf_threshold:.2f}")
     
     def update_alert_conf(self, value):
         self.alert_conf = float(value)
-        # Cập nhật nhãn để hiển thị giá trị hiện tại
+        # Update the label to show the current value
         for child in self.alert_conf_slider.master.winfo_children():
             if isinstance(child, ttk.Label) and "Alert Confidence" in child.cget("text"):
                 child.config(text=f"Alert Confidence: {self.alert_conf:.2f}")
     
     def update_alert_time(self, value):
         self.alert_time = float(value)
-        # Cập nhật nhãn để hiển thị giá trị hiện tại
+        # Update the label to show the current value
         for child in self.alert_time_slider.master.winfo_children():
             if isinstance(child, ttk.Label) and "Alert Time" in child.cget("text"):
                 child.config(text=f"Alert Time (seconds): {self.alert_time:.2f}")
@@ -279,14 +286,14 @@ class DrowningDetectionApp:
     def load_model(self):
         self.status_var.set(f"Loading model from {self.model_path}...")
         
-        # Vô hiệu hóa các nút trong quá trình tải
+        # Disable buttons during loading
         self.select_video_btn.config(state=tk.DISABLED)
         
-        # Tải mô hình trong một luồng riêng biệt
+        # Load model in a separate thread
         def load_model_thread():
             try:
                 self.model = YOLO(self.model_path)
-                # Lên lịch cập nhật GUI trên luồng chính
+                # Schedule GUI update on the main thread
                 self.root.after(0, self.model_loaded)
             except Exception as e:
                 error_msg = f"Error loading model: {str(e)}"
@@ -308,7 +315,7 @@ class DrowningDetectionApp:
             self.video_path = file_path
             self.status_var.set(f"Video selected: {os.path.basename(file_path)}")
             
-            # Mở video
+            # Open video
             if self.cap is not None:
                 self.cap.release()
             
@@ -317,13 +324,13 @@ class DrowningDetectionApp:
                 self.show_error(f"Error opening video: {file_path}")
                 return
             
-            # Hiển thị khung hình đầu tiên
+            # Display first frame
             ret, frame = self.cap.read()
             if ret:
                 self.current_frame = frame
                 self.display_frame(frame)
                 
-                # Kích hoạt nút phát
+                # Enable play button
                 self.play_btn.config(state=tk.NORMAL)
                 self.stop_btn.config(state=tk.NORMAL)
             else:
@@ -334,7 +341,7 @@ class DrowningDetectionApp:
             self.is_playing = False
             self.play_btn.config(text="Play Video")
             
-            # Dừng cảnh báo nếu video tạm dừng
+            # Stop alert if video is paused
             if self.arduino_connected:
                 self.send_arduino_command("STOP_ALERT")
                 self.previous_alert_state = False
@@ -342,7 +349,7 @@ class DrowningDetectionApp:
             self.is_playing = True
             self.play_btn.config(text="Pause Video")
             
-            # Bắt đầu xử lý video trong một luồng nếu chưa chạy
+            # Start video processing in a thread if not already running
             if self.thread is None or not self.thread.is_alive():
                 self.thread = threading.Thread(target=self.process_video, daemon=True)
                 self.thread.start()
@@ -351,12 +358,12 @@ class DrowningDetectionApp:
         self.is_playing = False
         self.play_btn.config(text="Play Video")
         
-        # Dừng cảnh báo khi video dừng
+        # Stop alert when video is stopped
         if self.arduino_connected:
             self.send_arduino_command("STOP_ALERT")
             self.previous_alert_state = False
         
-        # Đặt lại video về đầu
+        # Reset video to beginning
         if self.cap is not None:
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             ret, frame = self.cap.read()
@@ -386,188 +393,229 @@ class DrowningDetectionApp:
         if self.cap is None:
             return
             
-        # Biến cho phát hiện đuối nước
+        # Variables for drowning detection
         drowning_start_time = None
         fps = self.cap.get(cv2.CAP_PROP_FPS)
         
-        # Đặt lại video nếu ở cuối
+        # Reset video if at end
         if int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) == int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)):
             self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             
         self.status_var.set("Processing video...")
         
-        # Cho tự động lưu hình ảnh
+        # For auto-saving images
         alert_saved = False
         save_dir = "drowning_alerts"
         os.makedirs(save_dir, exist_ok=True)
         
+        # For FPS calculation
+        self.frame_count = 0
+        self.start_time = time.time()
+        frame_id = 0
+        
         while self.is_playing:
-            ret, frame = self.cap.read()
-            if not ret:
-                # Kết thúc video
-                self.is_playing = False
-                self.play_btn.config(text="Play Video")
-                self.status_var.set("End of video")
-                self.root.after(0, lambda: self.play_btn.config(state=tk.NORMAL))
+            try:
+                # Calculate current FPS
+                self.frame_count += 1
+                current_time = time.time()
+                elapsed_time = current_time - self.start_time
                 
-                # Dừng cảnh báo Arduino ở cuối video
-                if self.arduino_connected:
-                    self.send_arduino_command("STOP_ALERT")
-                    self.previous_alert_state = False
-                break
+                if elapsed_time >= 1.0:  # Update FPS every second
+                    self.actual_fps = self.frame_count / elapsed_time
+                    # Update skip frames based on actual FPS vs target FPS
+                    if self.actual_fps < self.target_fps * 0.8:  # If we're below 80% of target FPS
+                        self.skip_frames = min(self.skip_frames + 1, 3)  # Increase skip, max 3
+                    elif self.actual_fps > self.target_fps * 1.2:  # If we're above 120% of target FPS
+                        self.skip_frames = max(self.skip_frames - 1, 0)  # Decrease skip, min 0
+                    
+                    self.status_var.set(f"Processing video... FPS: {self.actual_fps:.1f} (Skip: {self.skip_frames})")
+                    self.frame_count = 0
+                    self.start_time = current_time
                 
-            # Chạy phát hiện
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
-            
-            # Xử lý kết quả phát hiện
-            boxes = []
-            classes = []
-            confidences = []
-            is_drowning_detected = False
-            high_conf_drowning = False
-            drowning_count = 0
-            swimming_count = 0
-            tread_water_count = 0
-            max_drowning_conf = 0
-            
-            for detection in results.boxes.data:
-                x1, y1, x2, y2, conf, cls = detection
-                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                # Read frame
+                ret, frame = self.cap.read()
+                frame_id += 1
                 
-                # Lấy tên lớp
-                class_id = int(cls)
-                class_name = self.model.names[class_id]
+                if not ret:
+                    # End of video
+                    self.is_playing = False
+                    self.play_btn.config(text="Play Video")
+                    self.status_var.set("End of video")
+                    self.root.after(0, lambda: self.play_btn.config(state=tk.NORMAL))
+                    
+                    # Stop Arduino alert at end of video
+                    if self.arduino_connected:
+                        self.send_arduino_command("STOP_ALERT")
+                        self.previous_alert_state = False
+                    break
                 
-                # Thêm vào danh sách
-                boxes.append([x1, y1, x2, y2])
-                classes.append(class_name)
-                confidences.append(conf.item())
+                # Skip frames if needed for performance
+                if self.skip_frames > 0 and frame_id % (self.skip_frames + 1) != 0:
+                    continue
                 
-                # Đếm số lượng phát hiện theo lớp
-                if class_name == "drowning":
-                    drowning_count += 1
-                    conf_value = conf.item()
-                    max_drowning_conf = max(max_drowning_conf, conf_value)
-                    if conf_value > self.alert_conf:
-                        is_drowning_detected = True
-                        high_conf_drowning = True
-                elif class_name == "swimming":
-                    swimming_count += 1
-                elif class_name == "tread water":
-                    tread_water_count += 1
-            
-            # Cập nhật bộ hẹn giờ đuối nước
-            current_time = time.time()
-            if high_conf_drowning:
-                if drowning_start_time is None:
-                    drowning_start_time = current_time
-                    alert_saved = False  # Đặt lại cờ đã lưu khi phát hiện đuối nước mới
-            else:
-                drowning_start_time = None
-            
-            # Tính thời gian đuối nước
-            drowning_duration = 0
-            if drowning_start_time is not None:
-                drowning_duration = current_time - drowning_start_time
-            
-            # Xác định xem có nên hiển thị cảnh báo hay không
-            show_alert = drowning_start_time is not None and drowning_duration >= self.alert_time
-            
-            # Cập nhật Arduino với trạng thái cảnh báo
-            if self.arduino_connected and show_alert != self.previous_alert_state:
-                if show_alert:
-                    self.send_arduino_command("DROWNING_ALERT")
+                # Run detection
+                results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
+                
+                # Process detection results
+                boxes = []
+                classes = []
+                confidences = []
+                is_drowning_detected = False
+                high_conf_drowning = False
+                drowning_count = 0
+                swimming_count = 0
+                tread_water_count = 0
+                max_drowning_conf = 0
+                
+                for detection in results.boxes.data:
+                    x1, y1, x2, y2, conf, cls = detection
+                    x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                    
+                    # Get class name
+                    class_id = int(cls)
+                    class_name = self.model.names[class_id]
+                    
+                    # Add to lists
+                    boxes.append([x1, y1, x2, y2])
+                    classes.append(class_name)
+                    confidences.append(conf.item())
+                    
+                    # Count detections by class
+                    if class_name == "drowning":
+                        drowning_count += 1
+                        conf_value = conf.item()
+                        max_drowning_conf = max(max_drowning_conf, conf_value)
+                        if conf_value > self.alert_conf:
+                            is_drowning_detected = True
+                            high_conf_drowning = True
+                    elif class_name == "swimming":
+                        swimming_count += 1
+                    elif class_name == "tread water":
+                        tread_water_count += 1
+                
+                # Update drowning timer
+                current_time = time.time()
+                if high_conf_drowning:
+                    if drowning_start_time is None:
+                        drowning_start_time = current_time
+                        alert_saved = False  # Reset saved flag when a new drowning is detected
                 else:
-                    self.send_arduino_command("STOP_ALERT")
-                self.previous_alert_state = show_alert
+                    drowning_start_time = None
+                
+                # Calculate drowning duration
+                drowning_duration = 0
+                if drowning_start_time is not None:
+                    drowning_duration = current_time - drowning_start_time
+                
+                # Determine if alert should be shown
+                show_alert = drowning_start_time is not None and drowning_duration >= self.alert_time
+                
+                # Update Arduino with alert status
+                if self.arduino_connected and show_alert != self.previous_alert_state:
+                    if show_alert:
+                        self.send_arduino_command("DROWNING_ALERT")
+                    else:
+                        self.send_arduino_command("STOP_ALERT")
+                    self.previous_alert_state = show_alert
+                
+                # Draw bounding boxes and alerts
+                processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
+                
+                # Add FPS info to frame
+                cv2.putText(processed_frame, f"FPS: {self.actual_fps:.1f}", (10, 30), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Auto-save image when alert triggers and hasn't been saved yet
+                if show_alert and not alert_saved:
+                    timestamp = time.strftime("%Y%m%d_%H%M%S")
+                    save_path = os.path.join(save_dir, f"drowning_alert_{timestamp}.jpg")
+                    cv2.imwrite(save_path, processed_frame)
+                    alert_saved = True
+                    self.status_var.set(f"Alert! Image saved to {save_path}")
+                
+                # Add drowning timer indicator if detecting drowning
+                if drowning_start_time is not None:
+                    timer_text = f"Drowning Timer: {drowning_duration:.1f}s / {self.alert_time:.1f}s"
+                    cv2.putText(processed_frame, timer_text, (10, 60), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                
+                # Update detection info
+                self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
+                                                          max_drowning_conf, show_alert))
+                
+                # Store the current frame
+                self.current_frame = processed_frame
+                
+                # Display the frame
+                self.root.after(0, lambda f=processed_frame: self.display_frame(f))
+                
+                # Enable the save button
+                self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
+                
+            except Exception as e:
+                print(f"Error processing frame: {str(e)}")
+                time.sleep(0.1)  # Add small delay on error
             
-            # Vẽ hộp giới hạn và cảnh báo
-            processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
-            
-            # Tự động lưu hình ảnh khi kích hoạt cảnh báo và chưa được lưu
-            if show_alert and not alert_saved:
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                save_path = os.path.join(save_dir, f"drowning_alert_{timestamp}.jpg")
-                cv2.imwrite(save_path, processed_frame)
-                alert_saved = True
-                self.status_var.set(f"Alert! Image saved to {save_path}")
-            
-            # Thêm chỉ báo hẹn giờ đuối nước nếu phát hiện đuối nước
-            if drowning_start_time is not None:
-                timer_text = f"Drowning Timer: {drowning_duration:.1f}s / {self.alert_time:.1f}s"
-                cv2.putText(processed_frame, timer_text, (10, 60), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            
-            # Cập nhật thông tin phát hiện
-            self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
-                                                       max_drowning_conf, show_alert))
-            
-            # Lưu khung hình hiện tại
-            self.current_frame = processed_frame
-            
-            # Hiển thị khung hình
-            self.root.after(0, lambda f=processed_frame: self.display_frame(f))
-            
-            # Kích hoạt nút lưu
-            self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
-            
-            # Độ trễ nhẹ để không quá tải hệ thống
+            # Slight delay to not overload the system
             time.sleep(0.01)
     
     def draw_bbox(self, frame, boxes, classes, confidences, is_drowning=False):
-        """Vẽ các hộp giới hạn trên khung hình"""
+        """Draw bounding boxes on the frame"""
         out = frame.copy()
         
-        # Màu sắc cho các lớp khác nhau (định dạng BGR)
+        # Colors for different classes (BGR format)
         class_colors = {
-            "swimming": (0, 255, 0),      # Xanh lá
-            "tread water": (0, 255, 255), # Vàng
-            "drowning": (0, 0, 255)       # Đỏ
+            "swimming": (0, 255, 0),      # Green
+            "tread water": (0, 255, 255), # Yellow
+            "drowning": (0, 0, 255)       # Red
         }
         
-        # Vẽ hộp giới hạn
+        # Draw bounding boxes
         for i, box in enumerate(boxes):
             x1, y1, x2, y2 = box
             confidence = confidences[i]
             label = classes[i]
             
-            # Lấy màu dựa trên lớp
-            color = class_colors.get(label, (255, 0, 0))  # Mặc định là xanh dương
+            # Get color based on class
+            color = class_colors.get(label, (255, 0, 0))  # Default to blue
             
-            # Vẽ hộp với đường viền dày hơn nếu đuối nước
+            # Draw box with thicker borders if drowning
             thickness = 5 if label == "drowning" else 3
             cv2.rectangle(out, (x1, y1), (x2, y2), color, thickness)
             
-            # Thêm một hình chữ nhật đầy màu ở phía trên cho nền văn bản
+            # Add a filled rectangle at the top for text background
             cv2.rectangle(out, (x1, y1 - 30), (x1 + 160, y1), color, -1)
             text = f"{label}: {confidence:.2f}"
             
-            # Thêm văn bản
+            # Add text
             font_scale = 0.7
             cv2.putText(out, text, (x1 + 5, y1 - 5), 
                        cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), 2)
         
-        # Thêm văn bản cảnh báo nếu có cảnh báo đuối nước
+        # Add warning text if drowning alert
         if is_drowning:
             height, width = out.shape[:2]
             warning_text = "DROWNING DETECTED!"
             text_size = cv2.getTextSize(warning_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
             text_x = (width - text_size[0]) // 2
             
-            # Thêm văn bản cảnh báo ở phía trên
+            # Add warning text at the top
             cv2.putText(out, warning_text, (text_x, 70), 
                       cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
             
-            # Thêm đường viền nhấp nháy xung quanh khung hình
+            # Add flashing border around the frame
             border_thickness = int(3 + 2 * abs(np.sin(time.time() * 5)))
             cv2.rectangle(out, (5, 5), (width-5, height-5), (0, 0, 255), border_thickness)
         
         return out
     
     def update_info(self, drowning, swimming, tread_water, max_drowning_conf, alert):
-        """Cập nhật hộp văn bản thông tin"""
+        """Update the information text box"""
         self.info_text.config(state=tk.NORMAL)
         self.info_text.delete(1.0, tk.END)
+        
+        self.info_text.insert(tk.END, f"Model Type: YOLO\n")
+        self.info_text.insert(tk.END, f"FPS: {self.actual_fps:.1f}\n\n")
         
         self.info_text.insert(tk.END, f"Detection Results:\n\n")
         self.info_text.insert(tk.END, f"Drowning: {drowning}\n")
@@ -581,7 +629,7 @@ class DrowningDetectionApp:
             self.info_text.insert(tk.END, "\n⚠️ DROWNING ALERT! ⚠️\n", "alert")
             self.info_text.tag_configure("alert", foreground="red", font=("Arial", 12, "bold"))
             
-            # Thêm trạng thái Arduino nếu đã kết nối
+            # Add Arduino status if connected
             if self.arduino_connected:
                 self.info_text.insert(tk.END, "\nArduino alarm activated!", "arduino")
                 self.info_text.tag_configure("arduino", foreground="blue", font=("Arial", 10, "bold"))
@@ -589,45 +637,45 @@ class DrowningDetectionApp:
         self.info_text.config(state=tk.DISABLED)
     
     def display_frame(self, frame):
-        """Hiển thị khung hình trên canvas"""
+        """Display a frame on the canvas"""
         if frame is None:
             return
             
-        # Chuyển đổi từ BGR sang RGB cho tkinter
+        # Convert from BGR to RGB for tkinter
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         
-        # Thay đổi kích thước để phù hợp với canvas
+        # Resize to fit the canvas
         canvas_width = self.canvas.winfo_width()
         canvas_height = self.canvas.winfo_height()
         
         if canvas_width > 1 and canvas_height > 1:
-            # Tính tỉ lệ khung hình
+            # Calculate aspect ratio
             frame_height, frame_width = rgb_frame.shape[:2]
             aspect_ratio = frame_width / frame_height
             
             if canvas_width / canvas_height > aspect_ratio:
-                # Canvas rộng hơn mức cần thiết
+                # Canvas is wider than needed
                 new_height = canvas_height
                 new_width = int(new_height * aspect_ratio)
             else:
-                # Canvas cao hơn mức cần thiết
+                # Canvas is taller than needed
                 new_width = canvas_width
                 new_height = int(new_width / aspect_ratio)
             
-            # Thay đổi kích thước khung hình
+            # Resize the frame
             resized_frame = cv2.resize(rgb_frame, (new_width, new_height), interpolation=cv2.INTER_AREA)
             
-            # Tạo một hình ảnh PIL và sau đó là một PhotoImage
+            # Create a PIL Image and then a PhotoImage
             img = Image.fromarray(resized_frame)
             img_tk = ImageTk.PhotoImage(image=img)
             
-            # Cập nhật canvas
+            # Update the canvas
             self.canvas.config(width=new_width, height=new_height)
             self.canvas.create_image(canvas_width//2, canvas_height//2, anchor=tk.CENTER, image=img_tk)
-            self.canvas.image = img_tk  # Giữ tham chiếu để ngăn việc thu gom rác
+            self.canvas.image = img_tk  # Keep a reference to prevent garbage collection
     
     def show_error(self, message):
-        """Hiển thị thông báo lỗi"""
+        """Display an error message"""
         messagebox.showerror("Error", message)
         self.status_var.set(f"Error: {message}")
 
