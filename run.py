@@ -9,6 +9,7 @@ from PIL import Image, ImageTk
 import threading
 import serial
 import serial.tools.list_ports
+import queue
 
 class DrowningDetectionApp:
     def __init__(self, root):
@@ -37,6 +38,13 @@ class DrowningDetectionApp:
         self.is_playing = False
         self.thread = None
         self.current_frame = None
+        
+        # Performance optimization variables
+        self.frame_queue = queue.Queue(maxsize=5)  # Buffer for frames
+        self.result_queue = queue.Queue()  # Results from detection
+        self.skip_frames = 0  # Skip frames counter
+        self.target_fps = 15  # Target FPS
+        self.last_inference_time = 0
         
         # Arduino connection variables
         self.arduino = None
@@ -177,8 +185,10 @@ class DrowningDetectionApp:
         self.status_var.set(f"Found {len(port_names)} serial port(s)")
     
     def connect_arduino(self):
-        """Connect to the selected Arduino port"""  # Import here for debugging
-       
+        """Connect to the selected Arduino port"""
+        import serial  # Import here for debugging
+        print(f"Serial module path: {serial.__file__}")
+        print(f"Serial module version: {serial.__version__}")
 
         if not self.arduino_ports:
             self.show_error("No Arduino ports available")
@@ -282,20 +292,52 @@ class DrowningDetectionApp:
         # Disable buttons during loading
         self.select_video_btn.config(state=tk.DISABLED)
         
+        # Update status periodically
+        self.loading_start_time = time.time()
+        self.loading_update_id = self.root.after(1000, self.update_loading_status)
+        
         # Load model in a separate thread
         def load_model_thread():
             try:
                 self.model = YOLO(self.model_path)
+                print("YOLO model loaded successfully!")
+                
                 # Schedule GUI update on the main thread
                 self.root.after(0, self.model_loaded)
             except Exception as e:
-                error_msg = f"Error loading model: {str(e)}"
-                self.root.after(0, lambda msg=error_msg: self.show_error(msg))
+                import traceback
+                error_details = traceback.format_exc()
+                print(f"Error loading model: {str(e)}\n{error_details}")
+                # Fix issue with lambda capturing the exception variable
+                error_message = f"Error loading model: {str(e)}"
+                self.root.after(0, lambda msg=error_message: self.show_error(msg))
+            finally:
+                # Cancel the periodic update
+                if hasattr(self, 'loading_update_id'):
+                    self.root.after_cancel(self.loading_update_id)
         
         threading.Thread(target=load_model_thread, daemon=True).start()
     
+    def update_loading_status(self):
+        """Update the loading status with time elapsed"""
+        elapsed_time = time.time() - self.loading_start_time
+        self.status_var.set(f"Loading model... ({elapsed_time:.1f}s)")
+        
+        # Schedule the next update
+        self.loading_update_id = self.root.after(1000, self.update_loading_status)
+    
     def model_loaded(self):
-        self.status_var.set(f"Model loaded successfully. Please select a video file.")
+        # Cancel loading update timer if it exists
+        if hasattr(self, 'loading_update_id'):
+            self.root.after_cancel(self.loading_update_id)
+            
+        # Calculate loading time
+        if hasattr(self, 'loading_start_time'):
+            loading_time = time.time() - self.loading_start_time
+            self.status_var.set(f"YOLO model loaded successfully in {loading_time:.2f}s. Please select a video file.")
+        else:
+            self.status_var.set("YOLO model loaded successfully. Please select a video file.")
+            
         self.select_video_btn.config(state=tk.NORMAL)
     
     def select_video(self):
@@ -338,14 +380,47 @@ class DrowningDetectionApp:
             if self.arduino_connected:
                 self.send_arduino_command("STOP_ALERT")
                 self.previous_alert_state = False
+                
+            # Wait for processing threads to finish
+            self.stop_processing_threads()
+            
         else:
             self.is_playing = True
             self.play_btn.config(text="Pause Video")
+            
+            # Clear queues
+            while not self.frame_queue.empty():
+                try:
+                    self.frame_queue.get_nowait()
+                except queue.Empty:
+                    break
+            
+            while not self.result_queue.empty():
+                try:
+                    self.result_queue.get_nowait()
+                except queue.Empty:
+                    break
             
             # Start video processing in a thread if not already running
             if self.thread is None or not self.thread.is_alive():
                 self.thread = threading.Thread(target=self.process_video, daemon=True)
                 self.thread.start()
+    
+    def stop_processing_threads(self):
+        """Stop all processing threads"""
+        for _ in range(len(self.processing_threads)):
+            # Put None in the queue to signal thread to stop
+            try:
+                self.frame_queue.put(None, block=False)
+            except queue.Full:
+                pass
+                
+        # Wait for threads to finish
+        for thread in self.processing_threads:
+            if thread.is_alive():
+                thread.join(timeout=1.0)
+                
+        self.processing_threads = []
     
     def stop_video(self):
         self.is_playing = False
@@ -355,6 +430,9 @@ class DrowningDetectionApp:
         if self.arduino_connected:
             self.send_arduino_command("STOP_ALERT")
             self.previous_alert_state = False
+        
+        # Stop processing threads
+        self.stop_processing_threads()
         
         # Reset video to beginning
         if self.cap is not None:
@@ -382,53 +460,51 @@ class DrowningDetectionApp:
             except Exception as e:
                 self.show_error(f"Error saving frame: {str(e)}")
     
-    def process_video(self):
-        if self.cap is None:
-            return
-            
-        # Variables for drowning detection
-        drowning_start_time = None
-        fps = self.cap.get(cv2.CAP_PROP_FPS)
-        
-        # Reset video if at end
-        if int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) == int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)):
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            
-        self.status_var.set("Processing video...")
-        
-        # For auto-saving images
-        alert_saved = False
-        save_dir = "drowning_alerts"
-        os.makedirs(save_dir, exist_ok=True)
+    def start_processing_threads(self):
+        """Start processing threads for inference"""
+        # Start new threads
+        for _ in range(self.max_processing_threads):
+            thread = threading.Thread(target=self.inference_worker, daemon=True)
+            thread.start()
+            self.processing_threads.append(thread)
+    
+    def inference_worker(self):
+        """Worker thread for running inference"""
+        # Class names for YOLO model
+        yolo_class_names = ['swimming', 'tread water', 'drowning']
         
         while self.is_playing:
-            ret, frame = self.cap.read()
-            if not ret:
-                # End of video
-                self.is_playing = False
-                self.play_btn.config(text="Play Video")
-                self.status_var.set("End of video")
-                self.root.after(0, lambda: self.play_btn.config(state=tk.NORMAL))
+            try:
+                # Get a frame from the queue
+                item = self.frame_queue.get(timeout=1.0)
                 
-                # Stop Arduino alert at end of video
-                if self.arduino_connected:
-                    self.send_arduino_command("STOP_ALERT")
-                    self.previous_alert_state = False
-                break
+                # Check for stop signal
+                if item is None:
+                    break
                 
-            # Run detection
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
+                frame, frame_id = item
+                
+                # Run detection
+                boxes = []
+                classes = []
+                confidences = []
+                drowning_count = 0
+                swimming_count = 0
+                tread_water_count = 0
+                max_drowning_conf = 0
+                high_conf_drowning = False
+                
+                results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
             
             # Process detection results
             boxes = []
             classes = []
             confidences = []
-            is_drowning_detected = False
-            high_conf_drowning = False
             drowning_count = 0
             swimming_count = 0
             tread_water_count = 0
             max_drowning_conf = 0
+            high_conf_drowning = False
             
             for detection in results.boxes.data:
                 x1, y1, x2, y2, conf, cls = detection
@@ -449,7 +525,6 @@ class DrowningDetectionApp:
                     conf_value = conf.item()
                     max_drowning_conf = max(max_drowning_conf, conf_value)
                     if conf_value > self.alert_conf:
-                        is_drowning_detected = True
                         high_conf_drowning = True
                 elif class_name == "swimming":
                     swimming_count += 1
@@ -484,6 +559,10 @@ class DrowningDetectionApp:
             # Draw bounding boxes and alerts
             processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
             
+            # Add FPS info to frame
+            cv2.putText(processed_frame, f"FPS: {actual_fps:.1f}", (10, 30), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
             # Auto-save image when alert triggers and hasn't been saved yet
             if show_alert and not alert_saved:
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -500,7 +579,7 @@ class DrowningDetectionApp:
             
             # Update detection info
             self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
-                                                       max_drowning_conf, show_alert))
+                                                           max_drowning_conf, show_alert, actual_fps))
             
             # Store the current frame
             self.current_frame = processed_frame
@@ -511,8 +590,202 @@ class DrowningDetectionApp:
             # Enable the save button
             self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
             
-            # Slight delay to not overload the system
-            time.sleep(0.01)
+            # Reset error counter on successful processing
+            consecutive_errors = 0
+            
+        except Exception as e:
+            print(f"Error in inference worker: {str(e)}")
+            consecutive_errors += 1
+            if consecutive_errors >= max_consecutive_errors:
+                self.root.after(0, lambda msg=f"Multiple errors during video processing: {str(e)}": self.show_error(msg))
+                self.is_playing = False
+                break
+    
+    def process_video(self):
+        if self.cap is None:
+            return
+            
+        # Variables for drowning detection
+        drowning_start_time = None
+        fps = self.cap.get(cv2.CAP_PROP_FPS)
+        actual_fps = fps  # For FPS calculation
+        frame_count = 0
+        start_time = time.time()
+        
+        # Reset video if at end
+        if int(self.cap.get(cv2.CAP_PROP_POS_FRAMES)) == int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT)):
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            
+        self.status_var.set("Processing video...")
+        
+        # For auto-saving images
+        alert_saved = False
+        save_dir = "drowning_alerts"
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # For FPS calculation
+        fps_update_interval = 1.0  # Update FPS every second
+        last_fps_update = time.time()
+        
+        # For frame skipping
+        frame_id = 0
+        
+        # For error handling
+        consecutive_errors = 0
+        max_consecutive_errors = 3
+        
+        while self.is_playing:
+            try:
+                # Calculate current FPS
+                frame_count += 1
+                current_time = time.time()
+                elapsed_time = current_time - start_time
+                
+                if elapsed_time >= fps_update_interval:
+                    actual_fps = frame_count / elapsed_time
+                    # Update skip frames based on actual FPS vs target FPS
+                    if actual_fps < self.target_fps * 0.8:  # If we're below 80% of target FPS
+                        self.skip_frames = min(self.skip_frames + 1, 3)  # Increase skip, max 3
+                    elif actual_fps > self.target_fps * 1.2:  # If we're above 120% of target FPS
+                        self.skip_frames = max(self.skip_frames - 1, 0)  # Decrease skip, min 0
+                        
+                    if current_time - last_fps_update >= fps_update_interval:
+                        self.status_var.set(f"Processing video... FPS: {actual_fps:.1f} (Skip: {self.skip_frames})")
+                        frame_count = 0
+                        start_time = current_time
+                        last_fps_update = current_time
+                
+                # Read frame
+                ret, frame = self.cap.read()
+                frame_id += 1
+                
+                if not ret:
+                    # End of video
+                    self.is_playing = False
+                    self.play_btn.config(text="Play Video")
+                    self.status_var.set("End of video")
+                    self.root.after(0, lambda: self.play_btn.config(state=tk.NORMAL))
+                    
+                    # Stop Arduino alert at end of video
+                    if self.arduino_connected:
+                        self.send_arduino_command("STOP_ALERT")
+                        self.previous_alert_state = False
+                            
+                        # Stop processing threads
+                        self.stop_processing_threads()
+                    break
+                
+                # Skip frames if needed for performance
+                if self.skip_frames > 0 and frame_id % (self.skip_frames + 1) != 0:
+                    continue
+                
+                # Process the frame
+                results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
+            
+            # Process detection results
+            boxes = []
+            classes = []
+            confidences = []
+            drowning_count = 0
+            swimming_count = 0
+            tread_water_count = 0
+            max_drowning_conf = 0
+            high_conf_drowning = False
+            
+            for detection in results.boxes.data:
+                x1, y1, x2, y2, conf, cls = detection
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                
+                # Get class name
+                class_id = int(cls)
+                class_name = self.model.names[class_id]
+                
+                # Add to lists
+                boxes.append([x1, y1, x2, y2])
+                classes.append(class_name)
+                confidences.append(conf.item())
+                
+                # Count detections by class
+                if class_name == "drowning":
+                    drowning_count += 1
+                    conf_value = conf.item()
+                    max_drowning_conf = max(max_drowning_conf, conf_value)
+                    if conf_value > self.alert_conf:
+                        high_conf_drowning = True
+                elif class_name == "swimming":
+                    swimming_count += 1
+                elif class_name == "tread water":
+                    tread_water_count += 1
+            
+            # Update drowning timer
+            current_time = time.time()
+            if high_conf_drowning:
+                if drowning_start_time is None:
+                    drowning_start_time = current_time
+                    alert_saved = False  # Reset saved flag when a new drowning is detected
+            else:
+                drowning_start_time = None
+            
+            # Calculate drowning duration
+            drowning_duration = 0
+            if drowning_start_time is not None:
+                drowning_duration = current_time - drowning_start_time
+            
+            # Determine if alert should be shown
+            show_alert = drowning_start_time is not None and drowning_duration >= self.alert_time
+            
+            # Update Arduino with alert status
+            if self.arduino_connected and show_alert != self.previous_alert_state:
+                if show_alert:
+                    self.send_arduino_command("DROWNING_ALERT")
+                else:
+                    self.send_arduino_command("STOP_ALERT")
+                self.previous_alert_state = show_alert
+            
+            # Draw bounding boxes and alerts
+            processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
+            
+            # Add FPS info to frame
+            cv2.putText(processed_frame, f"FPS: {actual_fps:.1f}", (10, 30), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+            # Auto-save image when alert triggers and hasn't been saved yet
+            if show_alert and not alert_saved:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                save_path = os.path.join(save_dir, f"drowning_alert_{timestamp}.jpg")
+                cv2.imwrite(save_path, processed_frame)
+                alert_saved = True
+                self.status_var.set(f"Alert! Image saved to {save_path}")
+            
+            # Add drowning timer indicator if detecting drowning
+            if drowning_start_time is not None:
+                timer_text = f"Drowning Timer: {drowning_duration:.1f}s / {self.alert_time:.1f}s"
+                cv2.putText(processed_frame, timer_text, (10, 60), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            # Update detection info
+            self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
+                                                           max_drowning_conf, show_alert, actual_fps))
+            
+            # Store the current frame
+            self.current_frame = processed_frame
+            
+            # Display the frame
+            self.root.after(0, lambda f=processed_frame: self.display_frame(f))
+            
+            # Enable the save button
+            self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
+            
+            # Reset error counter on successful processing
+            consecutive_errors = 0
+            
+        except Exception as e:
+            print(f"Error processing frame: {str(e)}")
+            consecutive_errors += 1
+            if consecutive_errors >= max_consecutive_errors:
+                self.root.after(0, lambda msg=f"Multiple errors during video processing: {str(e)}": self.show_error(msg))
+                self.is_playing = False
+                break
     
     def draw_bbox(self, frame, boxes, classes, confidences, is_drowning=False):
         """Draw bounding boxes on the frame"""
@@ -564,10 +837,18 @@ class DrowningDetectionApp:
         
         return out
     
-    def update_info(self, drowning, swimming, tread_water, max_drowning_conf, alert):
+    def update_info(self, drowning, swimming, tread_water, max_drowning_conf, alert, fps=0):
         """Update the information text box"""
         self.info_text.config(state=tk.NORMAL)
         self.info_text.delete(1.0, tk.END)
+        
+        self.info_text.insert(tk.END, f"Model Type: YOLO\n")
+        
+        # Show FPS
+        if fps > 0:
+            self.info_text.insert(tk.END, f"FPS: {fps:.1f}\n\n")
+        else:
+            self.info_text.insert(tk.END, "\n")
         
         self.info_text.insert(tk.END, f"Detection Results:\n\n")
         self.info_text.insert(tk.END, f"Drowning: {drowning}\n")
