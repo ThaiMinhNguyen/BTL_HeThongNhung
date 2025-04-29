@@ -494,106 +494,112 @@ class DrowningDetectionApp:
                 max_drowning_conf = 0
                 high_conf_drowning = False
                 
-                try:
-                    results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
-                    
-                    for detection in results.boxes.data:
-                        x1, y1, x2, y2, conf, cls = detection
-                        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-                        
-                        # Get class name
-                        class_id = int(cls)
-                        class_name = self.model.names[class_id]
-                        
-                        # Add to lists
-                        boxes.append([x1, y1, x2, y2])
-                        classes.append(class_name)
-                        confidences.append(conf.item())
-                        
-                        # Count detections by class
-                        if class_name == "drowning":
-                            drowning_count += 1
-                            conf_value = conf.item()
-                            max_drowning_conf = max(max_drowning_conf, conf_value)
-                            if conf_value > self.alert_conf:
-                                high_conf_drowning = True
-                        elif class_name == "swimming":
-                            swimming_count += 1
-                        elif class_name == "tread water":
-                            tread_water_count += 1
-                except Exception as e:
-                    print(f"Error during inference: {str(e)}")
-                    return
-                
-                # Update drowning timer
-                current_time = time.time()
-                if high_conf_drowning:
-                    if drowning_start_time is None:
-                        drowning_start_time = current_time
-                        alert_saved = False  # Reset saved flag when a new drowning is detected
-                else:
-                    drowning_start_time = None
-                
-                # Calculate drowning duration
-                drowning_duration = 0
-                if drowning_start_time is not None:
-                    drowning_duration = current_time - drowning_start_time
-                
-                # Determine if alert should be shown
-                show_alert = drowning_start_time is not None and drowning_duration >= self.alert_time
-                
-                # Update Arduino with alert status
-                if self.arduino_connected and show_alert != self.previous_alert_state:
-                    if show_alert:
-                        self.send_arduino_command("DROWNING_ALERT")
-                    else:
-                        self.send_arduino_command("STOP_ALERT")
-                    self.previous_alert_state = show_alert
-                
-                # Draw bounding boxes and alerts
-                processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
-                
-                # Add FPS info to frame
-                cv2.putText(processed_frame, f"FPS: {actual_fps:.1f}", (10, 30), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
             
-                # Auto-save image when alert triggers and hasn't been saved yet
-                if show_alert and not alert_saved:
-                    timestamp = time.strftime("%Y%m%d_%H%M%S")
-                    save_path = os.path.join(save_dir, f"drowning_alert_{timestamp}.jpg")
-                    cv2.imwrite(save_path, processed_frame)
-                    alert_saved = True
-                    self.status_var.set(f"Alert! Image saved to {save_path}")
+            # Process detection results
+            boxes = []
+            classes = []
+            confidences = []
+            drowning_count = 0
+            swimming_count = 0
+            tread_water_count = 0
+            max_drowning_conf = 0
+            high_conf_drowning = False
+            
+            for detection in results.boxes.data:
+                x1, y1, x2, y2, conf, cls = detection
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
                 
-                # Add drowning timer indicator if detecting drowning
-                if drowning_start_time is not None:
-                    timer_text = f"Drowning Timer: {drowning_duration:.1f}s / {self.alert_time:.1f}s"
-                    cv2.putText(processed_frame, timer_text, (10, 60), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                # Get class name
+                class_id = int(cls)
+                class_name = self.model.names[class_id]
                 
-                # Update detection info
-                self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
+                # Add to lists
+                boxes.append([x1, y1, x2, y2])
+                classes.append(class_name)
+                confidences.append(conf.item())
+                
+                # Count detections by class
+                if class_name == "drowning":
+                    drowning_count += 1
+                    conf_value = conf.item()
+                    max_drowning_conf = max(max_drowning_conf, conf_value)
+                    if conf_value > self.alert_conf:
+                        high_conf_drowning = True
+                elif class_name == "swimming":
+                    swimming_count += 1
+                elif class_name == "tread water":
+                    tread_water_count += 1
+            
+            # Update drowning timer
+            current_time = time.time()
+            if high_conf_drowning:
+                if drowning_start_time is None:
+                    drowning_start_time = current_time
+                    alert_saved = False  # Reset saved flag when a new drowning is detected
+            else:
+                drowning_start_time = None
+            
+            # Calculate drowning duration
+            drowning_duration = 0
+            if drowning_start_time is not None:
+                drowning_duration = current_time - drowning_start_time
+            
+            # Determine if alert should be shown
+            show_alert = drowning_start_time is not None and drowning_duration >= self.alert_time
+            
+            # Update Arduino with alert status
+            if self.arduino_connected and show_alert != self.previous_alert_state:
+                if show_alert:
+                    self.send_arduino_command("DROWNING_ALERT")
+                else:
+                    self.send_arduino_command("STOP_ALERT")
+                self.previous_alert_state = show_alert
+            
+            # Draw bounding boxes and alerts
+            processed_frame = self.draw_bbox(frame, boxes, classes, confidences, show_alert)
+            
+            # Add FPS info to frame
+            cv2.putText(processed_frame, f"FPS: {actual_fps:.1f}", (10, 30), 
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        
+            # Auto-save image when alert triggers and hasn't been saved yet
+            if show_alert and not alert_saved:
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                save_path = os.path.join(save_dir, f"drowning_alert_{timestamp}.jpg")
+                cv2.imwrite(save_path, processed_frame)
+                alert_saved = True
+                self.status_var.set(f"Alert! Image saved to {save_path}")
+            
+            # Add drowning timer indicator if detecting drowning
+            if drowning_start_time is not None:
+                timer_text = f"Drowning Timer: {drowning_duration:.1f}s / {self.alert_time:.1f}s"
+                cv2.putText(processed_frame, timer_text, (10, 60), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            
+            # Update detection info
+            self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
                                                            max_drowning_conf, show_alert, actual_fps))
-                
-                # Store the current frame
-                self.current_frame = processed_frame
-                
-                # Display the frame
-                self.root.after(0, lambda f=processed_frame: self.display_frame(f))
-                
-                # Enable the save button
-                self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
-                
-                # Reset error counter on successful processing
-                consecutive_errors = 0
-                
-            except Exception as e:
-                print(f"Error in inference worker: {str(e)}")
-                consecutive_errors += 1
-                if consecutive_errors >= max_consecutive_errors:
-                    self.root.after(0, lambda msg=f"Multiple errors during video processing: {str(e)}": self.show_error(msg))
-                    self.is_playing = False
-                    break
+            
+            # Store the current frame
+            self.current_frame = processed_frame
+            
+            # Display the frame
+            self.root.after(0, lambda f=processed_frame: self.display_frame(f))
+            
+            # Enable the save button
+            self.root.after(0, lambda: self.save_btn.config(state=tk.NORMAL))
+            
+            # Reset error counter on successful processing
+            consecutive_errors = 0
+            
+        except Exception as e:
+            print(f"Error in inference worker: {str(e)}")
+            consecutive_errors += 1
+            if consecutive_errors >= max_consecutive_errors:
+                self.root.after(0, lambda msg=f"Multiple errors during video processing: {str(e)}": self.show_error(msg))
+                self.is_playing = False
+                break
     
     def process_video(self):
         if self.cap is None:
@@ -674,19 +680,8 @@ class DrowningDetectionApp:
                     continue
                 
                 # Process the frame
-                drowning_start_time, alert_saved, consecutive_errors = self.process_frame(frame, drowning_start_time, alert_saved, save_dir, actual_fps, consecutive_errors)
-                
-            except Exception as e:
-                print(f"Error processing frame: {str(e)}")
-                consecutive_errors += 1
-                if consecutive_errors >= max_consecutive_errors:
-                    self.root.after(0, lambda msg=f"Multiple errors during video processing: {str(e)}": self.show_error(msg))
-                    self.is_playing = False
-                    break
-    
-    def process_frame(self, frame, drowning_start_time, alert_saved, save_dir, actual_fps, consecutive_errors):
-        """Process a single frame for drowning detection"""
-        try:
+                results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
+            
             # Process detection results
             boxes = []
             classes = []
@@ -696,9 +691,6 @@ class DrowningDetectionApp:
             tread_water_count = 0
             max_drowning_conf = 0
             high_conf_drowning = False
-
-            # Run inference
-            results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
             
             for detection in results.boxes.data:
                 x1, y1, x2, y2, conf, cls = detection
@@ -724,7 +716,7 @@ class DrowningDetectionApp:
                     swimming_count += 1
                 elif class_name == "tread water":
                     tread_water_count += 1
-
+            
             # Update drowning timer
             current_time = time.time()
             if high_conf_drowning:
@@ -755,7 +747,7 @@ class DrowningDetectionApp:
             
             # Add FPS info to frame
             cv2.putText(processed_frame, f"FPS: {actual_fps:.1f}", (10, 30), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
         
             # Auto-save image when alert triggers and hasn't been saved yet
             if show_alert and not alert_saved:
@@ -769,11 +761,11 @@ class DrowningDetectionApp:
             if drowning_start_time is not None:
                 timer_text = f"Drowning Timer: {drowning_duration:.1f}s / {self.alert_time:.1f}s"
                 cv2.putText(processed_frame, timer_text, (10, 60), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                          cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
             # Update detection info
             self.root.after(0, lambda: self.update_info(drowning_count, swimming_count, tread_water_count, 
-                                                       max_drowning_conf, show_alert, actual_fps))
+                                                           max_drowning_conf, show_alert, actual_fps))
             
             # Store the current frame
             self.current_frame = processed_frame
@@ -787,12 +779,13 @@ class DrowningDetectionApp:
             # Reset error counter on successful processing
             consecutive_errors = 0
             
-            return drowning_start_time, alert_saved, consecutive_errors
-
         except Exception as e:
-            print(f"Error during frame processing: {str(e)}")
+            print(f"Error processing frame: {str(e)}")
             consecutive_errors += 1
-            return drowning_start_time, alert_saved, consecutive_errors
+            if consecutive_errors >= max_consecutive_errors:
+                self.root.after(0, lambda msg=f"Multiple errors during video processing: {str(e)}": self.show_error(msg))
+                self.is_playing = False
+                break
     
     def draw_bbox(self, frame, boxes, classes, confidences, is_drowning=False):
         """Draw bounding boxes on the frame"""
